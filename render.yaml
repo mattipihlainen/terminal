@@ -1,8 +1,7 @@
 services:
   - type: web
-    name: ottawa-trmnl-weather
+    name: terminal-in32
     runtime: node
-    plan: free
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
