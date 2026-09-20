@@ -44,3 +44,7 @@ Polling URL:
 `https://terminal-in32.onrender.com/weather`
 
 Paste `full-liquid.txt` (or `full.liquid`) into the TRMNL Private Plugin **Full** markup editor.
+
+
+## v7 Clare panel cleanup
+When Clare Work is active, the walk-home forecast is the only dedicated 7 AM callout. The duplicate Tomorrow at 7 AM card and Tomorrow Morning summary are hidden, and the hourly row starts at 8 AM.

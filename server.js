@@ -268,7 +268,7 @@ function raincoatForecast(rows, date, startHour, endHour) {
   return { needed: true, message: `Rain likely ${timing}` };
 }
 
-function buildDisplayHours(rows, mode, today, tomorrow, currentHour) {
+function buildDisplayHours(rows, mode, today, tomorrow, currentHour, clareWorkActive = false) {
   let chosen = [];
 
   if (mode === "school") {
@@ -276,7 +276,7 @@ function buildDisplayHours(rows, mode, today, tomorrow, currentHour) {
   } else if (mode === "calendar") {
     chosen = rows.filter((row) => row.date === today && row.hour >= Math.max(currentHour, 8) && row.hour <= 15);
   } else if (mode === "evening") {
-    chosen = rows.filter((row) => row.date === tomorrow && row.hour >= 7 && row.hour <= 14);
+    chosen = rows.filter((row) => row.date === tomorrow && row.hour >= (clareWorkActive ? 8 : 7) && row.hour <= 14);
   } else {
     const currentIndex = rows.findIndex((row) => row.date === today && row.hour >= currentHour);
     if (currentIndex >= 0) chosen = rows.slice(currentIndex, currentIndex + 8);
@@ -771,7 +771,7 @@ async function makePayload() {
           : raincoat?.needed ? "RAINCOAT TODAY" : "NO RAINCOAT NEEDED",
       message: raincoat?.message || "Rain forecast unavailable"
     },
-    hours: buildDisplayHours(rows, mode, today, tomorrow, now.hour),
+    hours: buildDisplayHours(rows, mode, today, tomorrow, now.hour, Boolean(clareWork && clareWork.active)),
     calendar: {
       visible: mode === "calendar",
       has_events: calendarResult.length > 0,

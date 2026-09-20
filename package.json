@@ -1,6 +1,6 @@
 {
   "name": "ottawa-trmnl-weather",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "description": "Custom Ottawa family weather + iCloud calendar screen for TRMNL",
   "main": "server.js",
   "type": "module",
