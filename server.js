@@ -132,6 +132,15 @@ function formatHour(hour) {
   return `${normalized} AM`;
 }
 
+
+function formatTodayDate(parts) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12));
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    month: "long",
+    day: "numeric"
+  }).format(date);
+}
 function formatGeneratedTime(parts) {
   const hour12 = parts.hour === 0 ? 12 : parts.hour > 12 ? parts.hour - 12 : parts.hour;
   const suffix = parts.hour >= 12 ? "PM" : "AM";
@@ -461,8 +470,7 @@ async function makePayload() {
       mode === "evening" ? "TOMORROW" :
       mode === "school" ? "SCHOOL MORNING" :
       mode === "calendar" ? "TODAY" : "TODAY",
-    date_label:
-      mode === "evening" ? `${weekdayForDate(tomorrow)} · TOMORROW` : `${now.weekday.toUpperCase()} · TODAY`,
+    date_label: `${now.weekday.toUpperCase()} · ${formatTodayDate(now).toUpperCase()}`,
     current,
     focus: {
       date: focusDate,

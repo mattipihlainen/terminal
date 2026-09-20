@@ -1,93 +1,123 @@
-<div class="screen screen--weather">
-  <div class="top-row">
-    <div>
-      <div class="eyebrow">{{ location }} WEATHER</div>
-      <div class="current-row">
-        <div class="current-temp">{{ current.temp }}°</div>
-        <div class="current-copy">
-          <div class="condition">{{ current.condition }}</div>
-          <div class="feels">Feels like {{ current.feels }}°</div>
-        </div>
+<style>
+  .wx-screen { width:100%; height:100%; padding:18px 24px 14px; box-sizing:border-box; font-family:Arial,Helvetica,sans-serif; color:#000; background:#fff; overflow:hidden; }
+  .wx-header { height:100px; display:flex; align-items:center; justify-content:space-between; border-bottom:3px solid #000; padding-bottom:10px; box-sizing:border-box; }
+  .wx-current { width:54%; display:flex; align-items:center; }
+  .wx-temp { font-size:78px; line-height:78px; font-weight:700; letter-spacing:-4px; margin-right:24px; white-space:nowrap; }
+  .wx-current-label { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:1.4px; margin-bottom:4px; }
+  .wx-condition { font-size:25px; line-height:28px; font-weight:700; }
+  .wx-feels { font-size:17px; margin-top:3px; }
+  .wx-summary { width:43%; text-align:right; }
+  .wx-day { font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px; }
+  .wx-mode { font-size:28px; line-height:30px; font-weight:800; text-transform:uppercase; }
+  .wx-highlow { font-size:17px; margin-top:4px; }
+  .wx-rain { height:64px; display:flex; align-items:center; border-bottom:2px solid #000; }
+  .wx-rain-symbol { width:50px; font-size:38px; font-weight:700; }
+  .wx-rain-title { font-size:22px; line-height:24px; font-weight:800; text-transform:uppercase; }
+  .wx-rain-detail { font-size:14px; line-height:16px; margin-top:2px; }
+  .wx-section-title { font-size:13px; line-height:15px; font-weight:800; letter-spacing:1.1px; text-transform:uppercase; margin-bottom:6px; }
+  .wx-hours { width:100%; display:flex; justify-content:space-between; }
+  .wx-hour { width:12%; text-align:center; }
+  .wx-hour-time { font-size:14px; line-height:16px; font-weight:700; white-space:nowrap; }
+  .wx-hour-icon { font-size:25px; line-height:28px; height:28px; overflow:hidden; }
+  .wx-hour-temp { font-size:27px; line-height:29px; font-weight:800; white-space:nowrap; }
+  .wx-hour-rain { font-size:12px; line-height:14px; }
+  .wx-hourly { padding-top:8px; }
+  .wx-calendar { border-top:2px solid #000; margin-top:8px; padding-top:7px; }
+  .wx-cal-grid { display:grid; grid-template-columns:1fr 1fr; column-gap:24px; row-gap:4px; }
+  .wx-cal-row { display:flex; min-width:0; }
+  .wx-cal-time { width:74px; font-size:14px; font-weight:800; flex:0 0 auto; }
+  .wx-cal-title { font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wx-cal-location { font-size:11px; font-weight:400; }
+  .wx-joke { border-top:2px solid #000; margin-top:8px; padding-top:7px; }
+  .wx-joke-label { font-size:11px; line-height:13px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:2px; }
+  .wx-joke-question { font-size:17px; line-height:19px; font-weight:700; }
+  .wx-joke-answer { font-size:14px; line-height:16px; margin-top:1px; }
+  .wx-footer { height:18px; display:flex; justify-content:space-between; align-items:flex-end; font-size:10px; line-height:11px; margin-top:4px; }
+</style>
+
+<div class="wx-screen">
+  <div class="wx-header">
+    <div class="wx-current">
+      <div class="wx-temp">{{ current.temp }}°</div>
+      <div>
+        <div class="wx-current-label">Ottawa · Now</div>
+        <div class="wx-condition">{{ current.condition }}</div>
+        <div class="wx-feels">Feels like {{ current.feels }}°</div>
       </div>
     </div>
 
-    <div class="focus-summary">
-      <div class="focus-label">{{ date_label }}</div>
-      <div class="focus-range">H {{ focus.high }}° &nbsp; L {{ focus.low }}°</div>
-      {% if mode == "evening" %}
-        <div class="focus-small">Morning around {{ focus.morning_temp }}°</div>
+    <div class="wx-summary">
+      <div class="wx-day">{{ date_label }}</div>
+      <div class="wx-mode">{{ mode_title }}</div>
+      <div class="wx-highlow">High {{ focus.high }}° · Low {{ focus.low }}°</div>
+    </div>
+  </div>
+
+  <div class="wx-rain">
+    {% if raincoat.needed == true %}
+      <div class="wx-rain-symbol">☂</div>
+    {% else %}
+      <div class="wx-rain-symbol">✓</div>
+    {% endif %}
+    <div>
+      <div class="wx-rain-title">{{ raincoat.title }}</div>
+      <div class="wx-rain-detail">{{ raincoat.message }}</div>
+    </div>
+  </div>
+
+  <div class="wx-hourly">
+    <div class="wx-section-title">
+      {% if mode == "evening" %}Tomorrow · Hour by hour{% else %}{% if mode == "school" %}Today · Before 3 PM{% else %}Upcoming weather{% endif %}{% endif %}
+    </div>
+
+    <div class="wx-hours">
+      {% for hour in hours %}
+        <div class="wx-hour">
+          <div class="wx-hour-time">{{ hour.time }}</div>
+          <div class="wx-hour-icon">{{ hour.icon }}</div>
+          <div class="wx-hour-temp">{{ hour.temp }}°</div>
+          <div class="wx-hour-rain">Rain {{ hour.pop }}%</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if calendar.visible == true %}
+    <div class="wx-calendar">
+      <div class="wx-section-title">Today's calendar</div>
+      {% if calendar.has_events == true %}
+        <div class="wx-cal-grid">
+          {% for event in calendar.events %}
+            <div class="wx-cal-row">
+              <div class="wx-cal-time">{{ event.time }}</div>
+              <div class="wx-cal-title">
+                {{ event.title }}
+                {% if event.location != "" %}<div class="wx-cal-location">{{ event.location }}</div>{% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="wx-cal-title">{{ calendar.empty_message }}</div>
       {% endif %}
     </div>
-  </div>
+  {% endif %}
 
-  <div class="rule"></div>
-
-  <div class="hourly-title">
-    {% if mode == "evening" %}TOMORROW MORNING + AFTERNOON{% elsif mode == "school" %}SCHOOL-DAY FORECAST{% else %}HOURLY FORECAST{% endif %}
-  </div>
-
-  <div class="hourly-grid">
-    {% for hour in hours %}
-      <div class="hour-card">
-        <div class="hour-time">{{ hour.time }}</div>
-        <div class="weather-symbol weather-symbol--{{ hour.icon | downcase }}">
-          {% if hour.icon == "SUN" %}☀{% elsif hour.icon == "RAIN" %}☂{% elsif hour.icon == "SNOW" %}✣{% elsif hour.icon == "PARTLY" %}◐{% elsif hour.icon == "FOG" %}≋{% else %}●{% endif %}
-        </div>
-        <div class="hour-temp">{{ hour.temp }}°</div>
-        <div class="hour-pop">{{ hour.pop }}% rain</div>
-      </div>
-    {% endfor %}
-  </div>
-
-  <div class="raincoat {% if raincoat.needed %}raincoat--needed{% endif %}">
-    <div class="raincoat-icon">{% if raincoat.needed %}☂{% else %}✓{% endif %}</div>
-    <div class="raincoat-copy">
-      <div class="raincoat-title">{{ raincoat.title }}</div>
-      <div class="raincoat-message">{{ raincoat.message }}</div>
+  {% if mode == "evening" %}
+    <div class="wx-calendar">
+      <div class="wx-section-title">Tomorrow morning</div>
+      <div class="wx-cal-title">Around {{ focus.morning_temp }}° at 7–8 AM · {{ focus.condition }}</div>
     </div>
+  {% endif %}
+
+  <div class="wx-joke">
+    <div class="wx-joke-label">Joke of the day</div>
+    <div class="wx-joke-question">{{ joke.question }}</div>
+    <div class="wx-joke-answer">{{ joke.answer }}</div>
   </div>
 
-  <div class="joke-row">
-    <div class="joke-label">TODAY'S JOKE</div>
-    <div class="joke-text"><strong>{{ joke.question }}</strong> {{ joke.answer }}</div>
-    <div class="updated">Updated {{ updated }}</div>
+  <div class="wx-footer">
+    <div>Ottawa, Ontario</div>
+    <div>Updated {{ updated }}</div>
   </div>
 </div>
-
-<style>
-  * { box-sizing: border-box; }
-  .screen--weather {
-    width: 100%; height: 100%; padding: 18px 22px 14px;
-    display: flex; flex-direction: column; color: #000; background: #fff;
-    font-family: Arial, Helvetica, sans-serif;
-  }
-  .top-row { display: flex; justify-content: space-between; align-items: flex-start; min-height: 108px; }
-  .eyebrow { font-size: 18px; font-weight: 800; letter-spacing: 1.4px; }
-  .current-row { display: flex; align-items: center; gap: 18px; margin-top: 2px; }
-  .current-temp { font-size: 70px; font-weight: 900; line-height: .95; letter-spacing: -4px; }
-  .condition { font-size: 24px; font-weight: 800; }
-  .feels { font-size: 17px; margin-top: 5px; }
-  .focus-summary { text-align: right; padding-top: 2px; }
-  .focus-label { font-size: 18px; font-weight: 900; letter-spacing: 1px; }
-  .focus-range { font-size: 29px; font-weight: 900; margin-top: 10px; }
-  .focus-small { font-size: 16px; margin-top: 4px; }
-  .rule { height: 3px; background: #000; width: 100%; margin: 5px 0 9px; }
-  .hourly-title { font-size: 15px; font-weight: 900; letter-spacing: 1.4px; margin-bottom: 6px; }
-  .hourly-grid { display: grid; grid-template-columns: repeat(8, 1fr); border: 2px solid #000; min-height: 142px; }
-  .hour-card { text-align: center; padding: 6px 2px 5px; border-right: 1px solid #000; }
-  .hour-card:last-child { border-right: 0; }
-  .hour-time { font-size: 13px; font-weight: 800; }
-  .weather-symbol { font-size: 29px; line-height: 1.15; margin-top: 5px; }
-  .hour-temp { font-size: 24px; font-weight: 900; margin-top: 1px; }
-  .hour-pop { font-size: 11px; margin-top: 3px; }
-  .raincoat { margin-top: 9px; border: 3px solid #000; min-height: 72px; display: flex; align-items: center; padding: 7px 14px; }
-  .raincoat--needed { border-width: 5px; }
-  .raincoat-icon { width: 54px; font-size: 40px; font-weight: 900; text-align: center; }
-  .raincoat-copy { padding-left: 10px; }
-  .raincoat-title { font-size: 25px; font-weight: 900; letter-spacing: .8px; }
-  .raincoat-message { font-size: 15px; margin-top: 2px; }
-  .joke-row { margin-top: auto; padding-top: 8px; border-top: 2px solid #000; display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 10px; }
-  .joke-label { font-size: 13px; font-weight: 900; letter-spacing: 1px; }
-  .joke-text { font-size: 14px; line-height: 1.2; }
-  .updated { font-size: 10px; white-space: nowrap; }
-</style>
