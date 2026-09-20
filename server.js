@@ -10,8 +10,16 @@ const TIMEZONE = "America/Toronto";
 const RAIN_PROBABILITY_THRESHOLD = 40;
 const RAIN_MM_THRESHOLD = 0.2;
 
-let lastGoodPayload = null;
+const WEATHER_CACHE_TTL_MS = 10 * 60 * 1000;
+const WEATHER_STALE_MAX_MS = 12 * 60 * 60 * 1000;
+const CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let weatherCache = { data: null, fetchedAt: 0 };
+let weatherFetchInFlight = null;
 let lastWeatherError = null;
+
+const calendarCache = new Map();
+const calendarFetchInFlight = new Map();
 
 
 // Keep calendar URLs in Render environment variables so they are not exposed in GitHub.
@@ -394,9 +402,9 @@ function expandCalendarEvents(parsed, targetDate, sourceIndex) {
 
 async function fetchSingleCalendar(url, targetDate, sourceIndex) {
   const normalized = normalizeCalendarUrl(url);
-  const response = await fetchWithTimeout(normalized, {
-    headers: { "User-Agent": "ottawa-trmnl-weather/5.0" }
-  }, 12000);
+  const response = await fetch(normalized, {
+    headers: { "User-Agent": "ottawa-trmnl-weather/6.0" }
+  });
 
   if (!response.ok) {
     throw new Error(`iCloud calendar ${sourceIndex + 1} returned HTTP ${response.status}`);
@@ -407,7 +415,7 @@ async function fetchSingleCalendar(url, targetDate, sourceIndex) {
   return expandCalendarEvents(parsed, targetDate, sourceIndex);
 }
 
-async function fetchCalendars(targetDate) {
+async function fetchCalendarsFromSource(targetDate) {
   if (ICLOUD_CALENDAR_URLS.length === 0) return [];
 
   const settled = await Promise.allSettled(
@@ -430,6 +438,39 @@ async function fetchCalendars(targetDate) {
   }
 
   return deduped.sort((a, b) => a.sort_time - b.sort_time);
+}
+
+async function fetchCalendars(targetDate) {
+  if (ICLOUD_CALENDAR_URLS.length === 0) return [];
+
+  const cached = calendarCache.get(targetDate);
+  const nowMs = Date.now();
+  if (cached && nowMs - cached.fetchedAt < CALENDAR_CACHE_TTL_MS) {
+    return cached.events;
+  }
+
+  if (!calendarFetchInFlight.has(targetDate)) {
+    const promise = fetchCalendarsFromSource(targetDate)
+      .then((events) => {
+        calendarCache.set(targetDate, { events, fetchedAt: Date.now() });
+        return events;
+      })
+      .finally(() => {
+        calendarFetchInFlight.delete(targetDate);
+      });
+
+    calendarFetchInFlight.set(targetDate, promise);
+  }
+
+  try {
+    return await calendarFetchInFlight.get(targetDate);
+  } catch (error) {
+    if (cached) {
+      console.error("Calendar refresh failed; using cached calendar:", error.message);
+      return cached.events;
+    }
+    throw error;
+  }
 }
 
 function displayCalendarEvents(events) {
@@ -565,17 +606,7 @@ function buildClareWorkSummary(events, rows, today, tomorrow, nowHour) {
   };
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function fetchWeather() {
+function weatherRequestUrl() {
   const params = new URLSearchParams({
     latitude: String(LATITUDE),
     longitude: String(LONGITUDE),
@@ -586,37 +617,83 @@ async function fetchWeather() {
     daily: ["weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max"].join(",")
   });
 
-  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
-  let lastError;
+  return `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+}
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const response = await fetchWithTimeout(url, {
-        headers: { "User-Agent": "ottawa-trmnl-weather/5.0" }
-      }, 12000);
-
-      if (!response.ok) {
-        throw new Error(`Open-Meteo returned HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (!data || !data.current || !data.hourly || !data.daily) {
-        throw new Error("Open-Meteo response was missing required weather fields");
-      }
-
-      lastWeatherError = null;
-      return data;
-    } catch (error) {
-      lastError = error;
-      console.error(`Weather fetch attempt ${attempt}/3 failed:`, error.message);
-      if (attempt < 3) {
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-      }
+async function fetchWeatherFromSource() {
+  const response = await fetch(weatherRequestUrl(), {
+    headers: {
+      "User-Agent": "ottawa-trmnl-weather/6.0",
+      "Accept": "application/json"
     }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Open-Meteo returned HTTP ${response.status}`);
   }
 
-  lastWeatherError = lastError ? lastError.message : "Unknown weather fetch error";
-  throw lastError || new Error(lastWeatherError);
+  const data = await response.json();
+  if (!data || !data.current || !data.hourly || !data.daily) {
+    throw new Error("Open-Meteo response was missing required weather fields");
+  }
+
+  return data;
+}
+
+function startWeatherRefresh() {
+  if (weatherFetchInFlight) return weatherFetchInFlight;
+
+  weatherFetchInFlight = fetchWeatherFromSource()
+    .then((data) => {
+      weatherCache = { data, fetchedAt: Date.now() };
+      lastWeatherError = null;
+      console.log("Weather cache refreshed successfully");
+      return data;
+    })
+    .catch((error) => {
+      lastWeatherError = error?.message || String(error);
+      console.error("Weather refresh failed:", lastWeatherError);
+      throw error;
+    })
+    .finally(() => {
+      weatherFetchInFlight = null;
+    });
+
+  return weatherFetchInFlight;
+}
+
+function softTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Weather request still pending after ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs);
+      if (typeof timer.unref === "function") timer.unref();
+    })
+  ]);
+}
+
+async function getWeather() {
+  const age = weatherCache.data ? Date.now() - weatherCache.fetchedAt : Infinity;
+
+  if (weatherCache.data && age < WEATHER_CACHE_TTL_MS) {
+    return { data: weatherCache.data, stale: false };
+  }
+
+  const refresh = startWeatherRefresh();
+
+  if (weatherCache.data) {
+    // Never make TRMNL wait on a refresh when we already have usable data.
+    refresh.catch(() => {});
+    return {
+      data: weatherCache.data,
+      stale: age >= WEATHER_CACHE_TTL_MS,
+      very_stale: age >= WEATHER_STALE_MAX_MS
+    };
+  }
+
+  // Cold start only: wait longer for the first successful weather fetch.
+  const data = await softTimeout(refresh, 35000);
+  return { data, stale: false };
 }
 
 async function makePayload() {
@@ -630,7 +707,8 @@ async function makePayload() {
   else if (now.hour >= 8 && now.hour < 9) mode = "calendar";
   else if (!isWeekend && now.hour >= 7 && now.hour < 8) mode = "school";
 
-  const weather = await fetchWeather();
+  const weatherResult = await getWeather();
+  const weather = weatherResult.data;
 
   let allCalendarEvents = [];
   if (mode === "calendar" || (now.hour >= 16 && now.hour < 19)) {
@@ -667,7 +745,7 @@ async function makePayload() {
 
   const payload = {
     weather_ok: true,
-    stale: false,
+    stale: Boolean(weatherResult.stale),
     location: "Ottawa",
     timezone: TIMEZONE,
     mode,
@@ -706,7 +784,6 @@ async function makePayload() {
     status_message: ""
   };
 
-  lastGoodPayload = JSON.parse(JSON.stringify(payload));
   return payload;
 }
 
@@ -720,18 +797,6 @@ function makeFallbackPayload(error) {
   if (now.hour >= 18) mode = "evening";
   else if (now.hour >= 8 && now.hour < 9) mode = "calendar";
   else if (!isWeekend && now.hour >= 7 && now.hour < 8) mode = "school";
-
-  if (lastGoodPayload) {
-    const stale = JSON.parse(JSON.stringify(lastGoodPayload));
-    stale.weather_ok = true;
-    stale.stale = true;
-    stale.mode = mode;
-    stale.mode_title = mode === "evening" ? "TOMORROW" : mode === "school" ? "SCHOOL MORNING" : "TODAY";
-    stale.date_label = `${now.weekday.toUpperCase()} · ${formatTodayDate(now).toUpperCase()}`;
-    stale.updated = `${formatGeneratedTime(now)} · STALE`;
-    stale.status_message = "Using last successful weather update";
-    return stale;
-  }
 
   return {
     weather_ok: false,
@@ -787,9 +852,11 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         service: "ottawa-trmnl-weather",
-        version: "5.0.0",
+        version: "6.0.0",
         calendar_feeds_configured: ICLOUD_CALENDAR_URLS.length,
-        has_cached_weather: Boolean(lastGoodPayload),
+        has_cached_weather: Boolean(weatherCache.data),
+        weather_cache_age_seconds: weatherCache.data ? Math.round((Date.now() - weatherCache.fetchedAt) / 1000) : null,
+        weather_refresh_in_flight: Boolean(weatherFetchInFlight),
         last_weather_error: lastWeatherError
       });
       return;
@@ -813,5 +880,6 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Ottawa TRMNL weather running on port ${PORT}`);
+  console.log(`Ottawa TRMNL weather v6 running on port ${PORT}`);
+  startWeatherRefresh().catch(() => {});
 });

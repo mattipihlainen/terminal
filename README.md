@@ -1,52 +1,46 @@
-# Ottawa TRMNL Weather v5
+# Ottawa TRMNL Weather v6
 
-Custom Ottawa weather screen for TRMNL with two iCloud calendar feeds.
+A custom Ottawa family weather screen for TRMNL.
+
+## What v6 fixes
+
+- One shared Open-Meteo request is used even if TRMNL Preview and the physical device request the screen at the same time.
+- Weather is cached for 10 minutes.
+- Once weather has been fetched successfully, TRMNL is served immediately from cache while a refresh happens in the background.
+- The old aggressive 12-second weather abort/retry loop has been removed.
+- On a cold Render start, the server allows up to 35 seconds for the first weather response without cancelling the underlying request.
+- iCloud calendar feeds are cached independently for 5 minutes and cannot take the weather screen down.
+
+## Existing behavior retained
+
+- Ottawa weather, Celsius.
+- Current temperature always visible.
+- Weekday 7–8 AM School Morning view; weekends stay on Today.
+- 8–9 AM calendar view.
+- Evening tomorrow-focused view.
+- Daily kids joke.
+- Raincoat warning.
+- Two iCloud calendar feeds.
+- 4–7 PM Clare Work panel when an evening event contains `CLARE WORK`.
+- Clare panel includes walk-home weather, overnight hazards, and tomorrow at 7 AM.
 
 ## Render
 
-Build command:
+Build command: `npm install`
 
-    npm install
+Start command: `npm start`
 
-Start command:
+Environment variables:
 
-    npm start
+- `ICLOUD_CALENDAR_URL`
+- `ICLOUD_CALENDAR_URL_2`
 
-Health check:
-
-    /health
-
-Weather endpoint:
-
-    /weather
-
-## Required Render environment variables
-
-Set these in Render > Environment. Use the full `webcal://...` links; the app converts them to HTTPS automatically.
-
-    ICLOUD_CALENDAR_URL
-    ICLOUD_CALENDAR_URL_2
-
-Do not put the calendar URLs in a public GitHub repository. Anyone with a published iCloud calendar URL can read that calendar.
-
-## Screen behaviour
-
-- Current Ottawa temperature is always shown.
-- 7-8 AM Monday-Friday: School Morning.
-- 7-8 AM Saturday/Sunday: normal Today view.
-- 8-9 AM: today's events from both configured iCloud calendars plus weather.
-- 6-11 PM: tomorrow-focused forecast.
-- If either calendar contains an evening event whose title includes `CLARE WORK`, then from 4-7 PM a special panel replaces the normal raincoat panel.
-- The Clare panel shows:
-  - weather around the scheduled end of the work event for the walk home;
-  - an overnight summary covering roughly 7 PM-5 AM, including snow accumulation, rain, significant weather, low temperature/feels-like, and strong gusts;
-  - a specific forecast for 7 AM the following morning.
-- Significant overnight conditions such as >=10 cm snow, >=15 mm rain, severe freezing precipitation/thunderstorms, or gusts >=60 km/h are flagged prominently.
+Do not commit the private iCloud URLs to GitHub. Render accepts the original `webcal://` values.
 
 ## TRMNL
 
-Use this polling URL:
+Polling URL:
 
-    https://terminal-in32.onrender.com/weather
+`https://terminal-in32.onrender.com/weather`
 
-Paste `full.liquid` into the Full layout of your TRMNL Private Plugin.
+Paste `full-liquid.txt` (or `full.liquid`) into the TRMNL Private Plugin **Full** markup editor.
