@@ -1,0 +1,93 @@
+<div class="screen screen--weather">
+  <div class="top-row">
+    <div>
+      <div class="eyebrow">{{ location }} WEATHER</div>
+      <div class="current-row">
+        <div class="current-temp">{{ current.temp }}°</div>
+        <div class="current-copy">
+          <div class="condition">{{ current.condition }}</div>
+          <div class="feels">Feels like {{ current.feels }}°</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="focus-summary">
+      <div class="focus-label">{{ date_label }}</div>
+      <div class="focus-range">H {{ focus.high }}° &nbsp; L {{ focus.low }}°</div>
+      {% if mode == "evening" %}
+        <div class="focus-small">Morning around {{ focus.morning_temp }}°</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="hourly-title">
+    {% if mode == "evening" %}TOMORROW MORNING + AFTERNOON{% elsif mode == "school" %}SCHOOL-DAY FORECAST{% else %}HOURLY FORECAST{% endif %}
+  </div>
+
+  <div class="hourly-grid">
+    {% for hour in hours %}
+      <div class="hour-card">
+        <div class="hour-time">{{ hour.time }}</div>
+        <div class="weather-symbol weather-symbol--{{ hour.icon | downcase }}">
+          {% if hour.icon == "SUN" %}☀{% elsif hour.icon == "RAIN" %}☂{% elsif hour.icon == "SNOW" %}✣{% elsif hour.icon == "PARTLY" %}◐{% elsif hour.icon == "FOG" %}≋{% else %}●{% endif %}
+        </div>
+        <div class="hour-temp">{{ hour.temp }}°</div>
+        <div class="hour-pop">{{ hour.pop }}% rain</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="raincoat {% if raincoat.needed %}raincoat--needed{% endif %}">
+    <div class="raincoat-icon">{% if raincoat.needed %}☂{% else %}✓{% endif %}</div>
+    <div class="raincoat-copy">
+      <div class="raincoat-title">{{ raincoat.title }}</div>
+      <div class="raincoat-message">{{ raincoat.message }}</div>
+    </div>
+  </div>
+
+  <div class="joke-row">
+    <div class="joke-label">TODAY'S JOKE</div>
+    <div class="joke-text"><strong>{{ joke.question }}</strong> {{ joke.answer }}</div>
+    <div class="updated">Updated {{ updated }}</div>
+  </div>
+</div>
+
+<style>
+  * { box-sizing: border-box; }
+  .screen--weather {
+    width: 100%; height: 100%; padding: 18px 22px 14px;
+    display: flex; flex-direction: column; color: #000; background: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .top-row { display: flex; justify-content: space-between; align-items: flex-start; min-height: 108px; }
+  .eyebrow { font-size: 18px; font-weight: 800; letter-spacing: 1.4px; }
+  .current-row { display: flex; align-items: center; gap: 18px; margin-top: 2px; }
+  .current-temp { font-size: 70px; font-weight: 900; line-height: .95; letter-spacing: -4px; }
+  .condition { font-size: 24px; font-weight: 800; }
+  .feels { font-size: 17px; margin-top: 5px; }
+  .focus-summary { text-align: right; padding-top: 2px; }
+  .focus-label { font-size: 18px; font-weight: 900; letter-spacing: 1px; }
+  .focus-range { font-size: 29px; font-weight: 900; margin-top: 10px; }
+  .focus-small { font-size: 16px; margin-top: 4px; }
+  .rule { height: 3px; background: #000; width: 100%; margin: 5px 0 9px; }
+  .hourly-title { font-size: 15px; font-weight: 900; letter-spacing: 1.4px; margin-bottom: 6px; }
+  .hourly-grid { display: grid; grid-template-columns: repeat(8, 1fr); border: 2px solid #000; min-height: 142px; }
+  .hour-card { text-align: center; padding: 6px 2px 5px; border-right: 1px solid #000; }
+  .hour-card:last-child { border-right: 0; }
+  .hour-time { font-size: 13px; font-weight: 800; }
+  .weather-symbol { font-size: 29px; line-height: 1.15; margin-top: 5px; }
+  .hour-temp { font-size: 24px; font-weight: 900; margin-top: 1px; }
+  .hour-pop { font-size: 11px; margin-top: 3px; }
+  .raincoat { margin-top: 9px; border: 3px solid #000; min-height: 72px; display: flex; align-items: center; padding: 7px 14px; }
+  .raincoat--needed { border-width: 5px; }
+  .raincoat-icon { width: 54px; font-size: 40px; font-weight: 900; text-align: center; }
+  .raincoat-copy { padding-left: 10px; }
+  .raincoat-title { font-size: 25px; font-weight: 900; letter-spacing: .8px; }
+  .raincoat-message { font-size: 15px; margin-top: 2px; }
+  .joke-row { margin-top: auto; padding-top: 8px; border-top: 2px solid #000; display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 10px; }
+  .joke-label { font-size: 13px; font-weight: 900; letter-spacing: 1px; }
+  .joke-text { font-size: 14px; line-height: 1.2; }
+  .updated { font-size: 10px; white-space: nowrap; }
+</style>

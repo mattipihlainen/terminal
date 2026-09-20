@@ -1,0 +1,9 @@
+---
+name: Ottawa Family Weather
+strategy: polling
+refresh_interval: 15
+polling_url: https://YOUR-RENDER-URL.onrender.com/weather
+polling_headers: ''
+polling_verb: GET
+no_screen_padding: 'yes'
+dark_mode: 'no'

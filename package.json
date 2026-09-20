@@ -1,0 +1,13 @@
+{
+  "name": "ottawa-trmnl-weather",
+  "version": "1.0.0",
+  "description": "Ottawa family weather screen for TRMNL",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
