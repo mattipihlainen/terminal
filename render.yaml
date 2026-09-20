@@ -5,3 +5,8 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
+    envVars:
+      - key: ICLOUD_CALENDAR_URL
+        sync: false
+      - key: ICLOUD_CALENDAR_URL_2
+        sync: false
