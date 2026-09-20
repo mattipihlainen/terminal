@@ -48,3 +48,8 @@ Paste `full-liquid.txt` (or `full.liquid`) into the TRMNL Private Plugin **Full*
 
 ## v7 Clare panel cleanup
 When Clare Work is active, the walk-home forecast is the only dedicated 7 AM callout. The duplicate Tomorrow at 7 AM card and Tomorrow Morning summary are hidden, and the hourly row starts at 8 AM.
+
+
+## v8 weather-source resilience
+
+This version fixes repeated HTTP 429 rate-limit failures from Open-Meteo on shared Render IPs. It uses Open-Meteo as the primary source, enters a 30-minute cooldown after a 429, and automatically falls back to MET Norway. Successful weather is cached for 15 minutes and shared across all TRMNL/preview requests.

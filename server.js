@@ -10,13 +10,15 @@ const TIMEZONE = "America/Toronto";
 const RAIN_PROBABILITY_THRESHOLD = 40;
 const RAIN_MM_THRESHOLD = 0.2;
 
-const WEATHER_CACHE_TTL_MS = 10 * 60 * 1000;
+const WEATHER_CACHE_TTL_MS = 15 * 60 * 1000;
 const WEATHER_STALE_MAX_MS = 12 * 60 * 60 * 1000;
 const CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let weatherCache = { data: null, fetchedAt: 0 };
 let weatherFetchInFlight = null;
 let lastWeatherError = null;
+let lastWeatherProvider = null;
+let openMeteoBlockedUntil = 0;
 
 const calendarCache = new Map();
 const calendarFetchInFlight = new Map();
@@ -620,13 +622,174 @@ function weatherRequestUrl() {
   return `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
 }
 
-async function fetchWeatherFromSource() {
-  const response = await fetch(weatherRequestUrl(), {
+function metNoSymbolToCode(symbolCode = "") {
+  const s = String(symbolCode).toLowerCase();
+  if (s.includes("thunder")) return 95;
+  if (s.includes("snow")) return 73;
+  if (s.includes("sleet")) return 67;
+  if (s.includes("rain")) return s.includes("showers") ? 81 : 63;
+  if (s.includes("fog")) return 45;
+  if (s.includes("partlycloudy")) return 2;
+  if (s.includes("cloudy")) return 3;
+  if (s.includes("fair")) return 1;
+  if (s.includes("clearsky")) return 0;
+  return 3;
+}
+
+function apparentTemperatureC(tempC, windMs, humidity) {
+  const t = Number(tempC);
+  const windKmh = Number(windMs || 0) * 3.6;
+  const rh = Number(humidity || 0);
+
+  if (Number.isFinite(t) && t <= 10 && windKmh > 4.8) {
+    return 13.12 + 0.6215 * t - 11.37 * Math.pow(windKmh, 0.16) + 0.3965 * t * Math.pow(windKmh, 0.16);
+  }
+
+  // Keep the fallback conservative in warm weather rather than inventing a humidex.
+  if (Number.isFinite(t)) return t;
+  return null;
+}
+
+function metNoToWeather(data) {
+  const series = data?.properties?.timeseries;
+  if (!Array.isArray(series) || series.length === 0) {
+    throw new Error("MET Norway response was missing hourly data");
+  }
+
+  const hourly = {
+    time: [],
+    temperature_2m: [],
+    apparent_temperature: [],
+    precipitation_probability: [],
+    precipitation: [],
+    rain: [],
+    showers: [],
+    snowfall: [],
+    weather_code: [],
+    wind_speed_10m: [],
+    wind_gusts_10m: []
+  };
+
+  const dailyMap = new Map();
+  let firstCurrent = null;
+
+  for (const point of series.slice(0, 80)) {
+    const instant = point?.data?.instant?.details || {};
+    const next1 = point?.data?.next_1_hours || {};
+    const next6 = point?.data?.next_6_hours || {};
+    const summary = next1.summary || next6.summary || {};
+    const details = next1.details || next6.details || {};
+    const d = new Date(point.time);
+    if (Number.isNaN(d.getTime())) continue;
+
+    const lp = localParts(d);
+    const date = isoDate(lp);
+    const localStamp = `${date}T${pad2(lp.hour)}:00`;
+    const temp = Number(instant.air_temperature);
+    const humidity = Number(instant.relative_humidity);
+    const windMs = Number(instant.wind_speed || 0);
+    const gustMs = Number(instant.wind_speed_of_gust || windMs || 0);
+    const precip = Number(details.precipitation_amount || 0);
+    const pop = Number(details.probability_of_precipitation || 0);
+    const symbol = String(summary.symbol_code || "cloudy");
+    const code = metNoSymbolToCode(symbol);
+    const snowish = symbol.toLowerCase().includes("snow") || symbol.toLowerCase().includes("sleet");
+
+    hourly.time.push(localStamp);
+    hourly.temperature_2m.push(Number.isFinite(temp) ? temp : null);
+    hourly.apparent_temperature.push(apparentTemperatureC(temp, windMs, humidity));
+    hourly.precipitation_probability.push(Number.isFinite(pop) ? pop : 0);
+    hourly.precipitation.push(precip);
+    hourly.rain.push(snowish ? 0 : precip);
+    hourly.showers.push(0);
+    // MET Norway gives liquid-equivalent precipitation. For the fallback only,
+    // use a conservative 1 mm water ~= 1 cm snow estimate when the symbol is snow/sleet.
+    hourly.snowfall.push(snowish ? precip : 0);
+    hourly.weather_code.push(code);
+    hourly.wind_speed_10m.push(windMs * 3.6);
+    hourly.wind_gusts_10m.push(gustMs * 3.6);
+
+    if (!firstCurrent) {
+      firstCurrent = {
+        temperature_2m: Number.isFinite(temp) ? temp : null,
+        apparent_temperature: apparentTemperatureC(temp, windMs, humidity),
+        weather_code: code,
+        precipitation: precip,
+        rain: snowish ? 0 : precip,
+        showers: 0
+      };
+    }
+
+    const existing = dailyMap.get(date) || {
+      temps: [],
+      codes: [],
+      pops: []
+    };
+    if (Number.isFinite(temp)) existing.temps.push(temp);
+    existing.codes.push(code);
+    if (Number.isFinite(pop)) existing.pops.push(pop);
+    dailyMap.set(date, existing);
+  }
+
+  const dates = [...dailyMap.keys()].sort();
+  const daily = {
+    time: [],
+    weather_code: [],
+    temperature_2m_max: [],
+    temperature_2m_min: [],
+    precipitation_probability_max: []
+  };
+
+  for (const date of dates.slice(0, 4)) {
+    const d = dailyMap.get(date);
+    const temps = d.temps.length ? d.temps : [null];
+    const validTemps = temps.filter(Number.isFinite);
+    const codes = d.codes.length ? d.codes : [3];
+    const representative = codes.reduce((best, code) => weatherSeverity(code) > weatherSeverity(best) ? code : best, codes[0]);
+
+    daily.time.push(date);
+    daily.weather_code.push(representative);
+    daily.temperature_2m_max.push(validTemps.length ? Math.max(...validTemps) : null);
+    daily.temperature_2m_min.push(validTemps.length ? Math.min(...validTemps) : null);
+    daily.precipitation_probability_max.push(d.pops.length ? Math.max(...d.pops) : 0);
+  }
+
+  return {
+    provider: "MET Norway",
+    current: firstCurrent || {},
+    hourly,
+    daily
+  };
+}
+
+async function fetchMetNoWeather() {
+  const url = `https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=${LATITUDE}&lon=${LONGITUDE}`;
+  const response = await fetch(url, {
     headers: {
-      "User-Agent": "ottawa-trmnl-weather/6.0",
+      "User-Agent": "ottawa-trmnl-weather/8.0 contact: trmnl-weather",
       "Accept": "application/json"
     }
   });
+
+  if (!response.ok) {
+    throw new Error(`MET Norway returned HTTP ${response.status}`);
+  }
+
+  return metNoToWeather(await response.json());
+}
+
+async function fetchOpenMeteoWeather() {
+  const response = await fetch(weatherRequestUrl(), {
+    headers: {
+      "User-Agent": "ottawa-trmnl-weather/8.0",
+      "Accept": "application/json"
+    }
+  });
+
+  if (response.status === 429) {
+    openMeteoBlockedUntil = Date.now() + 30 * 60 * 1000;
+    throw new Error("Open-Meteo returned HTTP 429");
+  }
 
   if (!response.ok) {
     throw new Error(`Open-Meteo returned HTTP ${response.status}`);
@@ -637,7 +800,33 @@ async function fetchWeatherFromSource() {
     throw new Error("Open-Meteo response was missing required weather fields");
   }
 
+  data.provider = "Open-Meteo";
   return data;
+}
+
+async function fetchWeatherFromSource() {
+  const errors = [];
+
+  if (Date.now() >= openMeteoBlockedUntil) {
+    try {
+      return await fetchOpenMeteoWeather();
+    } catch (error) {
+      errors.push(error?.message || String(error));
+      console.warn("Primary weather source unavailable:", errors[errors.length - 1]);
+    }
+  } else {
+    errors.push("Open-Meteo temporarily in 429 cooldown");
+  }
+
+  try {
+    const fallback = await fetchMetNoWeather();
+    console.log("Using MET Norway weather fallback");
+    return fallback;
+  } catch (error) {
+    errors.push(error?.message || String(error));
+  }
+
+  throw new Error(`All weather sources failed: ${errors.join("; ")}`);
 }
 
 function startWeatherRefresh() {
@@ -647,7 +836,8 @@ function startWeatherRefresh() {
     .then((data) => {
       weatherCache = { data, fetchedAt: Date.now() };
       lastWeatherError = null;
-      console.log("Weather cache refreshed successfully");
+      lastWeatherProvider = data?.provider || "unknown";
+      console.log(`Weather cache refreshed successfully via ${lastWeatherProvider}`);
       return data;
     })
     .catch((error) => {
@@ -745,6 +935,7 @@ async function makePayload() {
 
   const payload = {
     weather_ok: true,
+    weather_source: weather?.provider || lastWeatherProvider || "unknown",
     stale: Boolean(weatherResult.stale),
     location: "Ottawa",
     timezone: TIMEZONE,
@@ -800,6 +991,7 @@ function makeFallbackPayload(error) {
 
   return {
     weather_ok: false,
+    weather_source: lastWeatherProvider || "unavailable",
     stale: false,
     location: "Ottawa",
     timezone: TIMEZONE,
@@ -852,12 +1044,14 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         service: "ottawa-trmnl-weather",
-        version: "6.0.0",
+        version: "8.0.0",
         calendar_feeds_configured: ICLOUD_CALENDAR_URLS.length,
         has_cached_weather: Boolean(weatherCache.data),
         weather_cache_age_seconds: weatherCache.data ? Math.round((Date.now() - weatherCache.fetchedAt) / 1000) : null,
         weather_refresh_in_flight: Boolean(weatherFetchInFlight),
-        last_weather_error: lastWeatherError
+        last_weather_error: lastWeatherError,
+        last_weather_provider: lastWeatherProvider,
+        open_meteo_cooldown_seconds: Math.max(0, Math.round((openMeteoBlockedUntil - Date.now()) / 1000))
       });
       return;
     }
@@ -880,6 +1074,6 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Ottawa TRMNL weather v6 running on port ${PORT}`);
+  console.log(`Ottawa TRMNL weather v8 running on port ${PORT}`);
   startWeatherRefresh().catch(() => {});
 });
