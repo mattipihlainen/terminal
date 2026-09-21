@@ -145,7 +145,17 @@
     </div>
     <div class="wx-fun-right">
       <div class="wx-joke-label">Animal fact of the day</div>
-      <div class="wx-fact-text">{{ animal_fact_text }}</div>
+      <div class="wx-fact-text">
+        {% if animal_fact_text %}
+          {{ animal_fact_text }}
+        {% elsif animal_fact_of_day %}
+          {{ animal_fact_of_day }}
+        {% elsif animal_fact and animal_fact.text %}
+          {{ animal_fact.text }}
+        {% else %}
+          Animal fact loading...
+        {% endif %}
+      </div>
     </div>
   </div>
 

@@ -53,3 +53,17 @@ When Clare Work is active, the walk-home forecast is the only dedicated 7 AM cal
 ## v8 weather-source resilience
 
 This version fixes repeated HTTP 429 rate-limit failures from Open-Meteo on shared Render IPs. It uses Open-Meteo as the primary source, enters a 30-minute cooldown after a 429, and automatically falls back to MET Norway. Successful weather is cached for 15 minutes and shared across all TRMNL/preview requests.
+
+
+## v9
+- Adds a different kid-friendly animal fact each day.
+- Uses the space to the right of Joke of the Day for the animal fact.
+- Joke and animal fact stay fixed for the Ottawa calendar day and change the next day.
+
+
+## v10 fix
+The animal fact is now exposed as a simple root-level `animal_fact_text` field for maximum TRMNL Liquid compatibility.
+
+
+## v11 animal fact fix
+The animal fact is now exposed under both `animal_fact_text` and `animal_fact_of_day`, and the Liquid template falls back to the older nested `animal_fact.text` value. This prevents a blank fact while TRMNL is still holding an older cached plugin payload.
