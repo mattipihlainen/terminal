@@ -35,10 +35,12 @@
   .wx-cal-time { width:74px; font-size:14px; font-weight:800; flex:0 0 auto; }
   .wx-cal-title { font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .wx-cal-location { font-size:11px; font-weight:400; }
-  .wx-joke { border-top:2px solid #000; margin-top:8px; padding-top:7px; }
+  .wx-fun-row { border-top:2px solid #000; margin-top:8px; padding-top:7px; display:grid; grid-template-columns:1fr 1fr; column-gap:24px; }
+  .wx-fun-right { border-left:1px solid #000; padding-left:20px; }
   .wx-joke-label { font-size:11px; line-height:13px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:2px; }
   .wx-joke-question { font-size:17px; line-height:19px; font-weight:700; }
   .wx-joke-answer { font-size:14px; line-height:16px; margin-top:1px; }
+  .wx-fact-text { font-size:16px; line-height:19px; font-weight:700; }
   .wx-footer { height:18px; display:flex; justify-content:space-between; align-items:flex-end; font-size:10px; line-height:11px; margin-top:4px; }
 </style>
 
@@ -68,11 +70,6 @@
           <div class="wx-clare-label">{{ clare_work.walk_home.label }}</div>
           <div class="wx-clare-main">{{ clare_work.walk_home.temp }}° · feels {{ clare_work.walk_home.feels }}° · {{ clare_work.walk_home.condition }}</div>
           <div class="wx-clare-detail">{{ clare_work.walk_home.detail }}</div>
-        </div>
-        <div>
-          <div class="wx-clare-label">Tomorrow at 7 AM</div>
-          <div class="wx-clare-main">{{ clare_work.tomorrow_7am.temp }}° · feels {{ clare_work.tomorrow_7am.feels }}° · {{ clare_work.tomorrow_7am.condition }}</div>
-          <div class="wx-clare-detail">{{ clare_work.tomorrow_7am.detail }}</div>
         </div>
       </div>
       <div class="wx-clare-overnight">Overnight: {{ clare_work.overnight }}</div>
@@ -133,17 +130,23 @@
     </div>
   {% endif %}
 
-  {% if mode == "evening" %}
+  {% if mode == "evening" and clare_work.active != true %}
     <div class="wx-calendar">
       <div class="wx-section-title">Tomorrow morning</div>
       <div class="wx-cal-title">Around {{ focus.morning_temp }}° at 7–8 AM · {{ focus.condition }}</div>
     </div>
   {% endif %}
 
-  <div class="wx-joke">
-    <div class="wx-joke-label">Joke of the day</div>
-    <div class="wx-joke-question">{{ joke.question }}</div>
-    <div class="wx-joke-answer">{{ joke.answer }}</div>
+  <div class="wx-fun-row">
+    <div>
+      <div class="wx-joke-label">Joke of the day</div>
+      <div class="wx-joke-question">{{ joke.question }}</div>
+      <div class="wx-joke-answer">{{ joke.answer }}</div>
+    </div>
+    <div class="wx-fun-right">
+      <div class="wx-joke-label">Animal fact of the day</div>
+      <div class="wx-fact-text">{{ animal_fact_text }}</div>
+    </div>
   </div>
 
   <div class="wx-footer">
