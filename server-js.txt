@@ -10,8 +10,18 @@ const TIMEZONE = "America/Toronto";
 const RAIN_PROBABILITY_THRESHOLD = 40;
 const RAIN_MM_THRESHOLD = 0.2;
 
-let lastGoodPayload = null;
+const WEATHER_CACHE_TTL_MS = 15 * 60 * 1000;
+const WEATHER_STALE_MAX_MS = 12 * 60 * 60 * 1000;
+const CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let weatherCache = { data: null, fetchedAt: 0 };
+let weatherFetchInFlight = null;
 let lastWeatherError = null;
+let lastWeatherProvider = null;
+let openMeteoBlockedUntil = 0;
+
+const calendarCache = new Map();
+const calendarFetchInFlight = new Map();
 
 
 // Keep calendar URLs in Render environment variables so they are not exposed in GitHub.
@@ -74,6 +84,61 @@ const JOKES = [
   ["How does a penguin build its house?", "Igloos it together."],
   ["Why are spiders great at computers?", "They're good at websites."],
   ["What kind of snacks do computers eat?", "Microchips."]
+];
+
+const ANIMAL_FACTS = [
+  "Octopuses have three hearts.",
+  "A group of flamingos is called a flamboyance.",
+  "Sea otters sometimes hold hands while sleeping so they do not drift apart.",
+  "Elephants can recognize themselves in a mirror.",
+  "A hummingbird can fly backward.",
+  "Dolphins use unique whistles that work a bit like names.",
+  "Penguins have knees, but most of their legs are hidden by feathers.",
+  "A giraffe has the same number of neck vertebrae as a human: seven.",
+  "Bees can communicate the direction of food with a waggle dance.",
+  "Crows can remember human faces for years.",
+  "A snail can have thousands of tiny teeth on its tongue-like radula.",
+  "Koalas have fingerprints that look remarkably similar to human fingerprints.",
+  "Butterflies taste with sensors on their feet.",
+  "Owls cannot move their eyes around in their sockets, so they turn their heads instead.",
+  "A blue whale's heart can weigh more than 150 kilograms.",
+  "Goats have rectangular pupils.",
+  "Frogs absorb water through their skin instead of drinking it like we do.",
+  "Polar bears have black skin under their fur.",
+  "Ravens can imitate sounds, including some human speech.",
+  "A kangaroo cannot walk backward easily because of its large tail and legs.",
+  "Cats cannot taste sweetness the way humans can.",
+  "A group of porcupines is called a prickle.",
+  "Sharks existed before trees appeared on Earth.",
+  "Woodpeckers wrap their very long tongues around the inside of their skulls.",
+  "Some turtles can breathe through specialized tissues near their tails while underwater.",
+  "A cheetah can accelerate faster than many sports cars over a short distance.",
+  "Male emperor penguins keep eggs warm on their feet under a fold of skin.",
+  "Squirrels help plant forests by forgetting where some of their buried nuts are.",
+  "A group of hedgehogs is sometimes called an array.",
+  "Dragonflies can fly forward, backward, sideways, and hover.",
+  "Orcas are the largest members of the dolphin family.",
+  "A rabbit's teeth never stop growing.",
+  "Axolotls can regrow lost limbs and parts of some organs.",
+  "Camels have three sets of eyelids to help protect their eyes from sand.",
+  "Sloths can hold their breath underwater for much longer than most people.",
+  "A platypus lays eggs even though it is a mammal.",
+  "Pigeons can recognize themselves in mirrors after training.",
+  "Meerkats take turns acting as lookouts for their group.",
+  "A tiger's stripe pattern is unique, much like a fingerprint.",
+  "Some geckos can climb smooth walls using millions of microscopic hairs on their toes.",
+  "Wombats produce cube-shaped droppings.",
+  "A group of crows is traditionally called a murder.",
+  "Starfish can regrow lost arms, and some species can regrow much more than that.",
+  "Hippos make sounds both above and below water.",
+  "Antarctic icefish have nearly transparent blood because they lack hemoglobin.",
+  "Prairie dogs use different alarm calls for different kinds of predators.",
+  "Parrots can use one foot like a hand to hold food.",
+  "Some bats can eat hundreds of insects in a single hour.",
+  "A narwhal's tusk is actually a very long tooth.",
+  "Red pandas use their bushy tails like blankets in cold weather.",
+  "Honeybees can recognize simple visual patterns and remember them.",
+  "The tiny bones in a cat's ear help give it excellent balance and hearing."
 ];
 
 function pad2(value) {
@@ -260,7 +325,7 @@ function raincoatForecast(rows, date, startHour, endHour) {
   return { needed: true, message: `Rain likely ${timing}` };
 }
 
-function buildDisplayHours(rows, mode, today, tomorrow, currentHour) {
+function buildDisplayHours(rows, mode, today, tomorrow, currentHour, clareWorkActive = false) {
   let chosen = [];
 
   if (mode === "school") {
@@ -268,7 +333,7 @@ function buildDisplayHours(rows, mode, today, tomorrow, currentHour) {
   } else if (mode === "calendar") {
     chosen = rows.filter((row) => row.date === today && row.hour >= Math.max(currentHour, 8) && row.hour <= 15);
   } else if (mode === "evening") {
-    chosen = rows.filter((row) => row.date === tomorrow && row.hour >= 7 && row.hour <= 14);
+    chosen = rows.filter((row) => row.date === tomorrow && row.hour >= (clareWorkActive ? 8 : 7) && row.hour <= 14);
   } else {
     const currentIndex = rows.findIndex((row) => row.date === today && row.hour >= currentHour);
     if (currentIndex >= 0) chosen = rows.slice(currentIndex, currentIndex + 8);
@@ -302,6 +367,11 @@ function selectJoke(today) {
   const index = dayOfYearIndex(today) % JOKES.length;
   const [question, answer] = JOKES[index];
   return { question, answer };
+}
+
+function selectAnimalFact(today) {
+  const index = (dayOfYearIndex(today) * 7 + 3) % ANIMAL_FACTS.length;
+  return { text: ANIMAL_FACTS[index] };
 }
 
 function normalizeCalendarUrl(url) {
@@ -394,9 +464,9 @@ function expandCalendarEvents(parsed, targetDate, sourceIndex) {
 
 async function fetchSingleCalendar(url, targetDate, sourceIndex) {
   const normalized = normalizeCalendarUrl(url);
-  const response = await fetchWithTimeout(normalized, {
-    headers: { "User-Agent": "ottawa-trmnl-weather/5.0" }
-  }, 12000);
+  const response = await fetch(normalized, {
+    headers: { "User-Agent": "ottawa-trmnl-weather/6.0" }
+  });
 
   if (!response.ok) {
     throw new Error(`iCloud calendar ${sourceIndex + 1} returned HTTP ${response.status}`);
@@ -407,7 +477,7 @@ async function fetchSingleCalendar(url, targetDate, sourceIndex) {
   return expandCalendarEvents(parsed, targetDate, sourceIndex);
 }
 
-async function fetchCalendars(targetDate) {
+async function fetchCalendarsFromSource(targetDate) {
   if (ICLOUD_CALENDAR_URLS.length === 0) return [];
 
   const settled = await Promise.allSettled(
@@ -430,6 +500,39 @@ async function fetchCalendars(targetDate) {
   }
 
   return deduped.sort((a, b) => a.sort_time - b.sort_time);
+}
+
+async function fetchCalendars(targetDate) {
+  if (ICLOUD_CALENDAR_URLS.length === 0) return [];
+
+  const cached = calendarCache.get(targetDate);
+  const nowMs = Date.now();
+  if (cached && nowMs - cached.fetchedAt < CALENDAR_CACHE_TTL_MS) {
+    return cached.events;
+  }
+
+  if (!calendarFetchInFlight.has(targetDate)) {
+    const promise = fetchCalendarsFromSource(targetDate)
+      .then((events) => {
+        calendarCache.set(targetDate, { events, fetchedAt: Date.now() });
+        return events;
+      })
+      .finally(() => {
+        calendarFetchInFlight.delete(targetDate);
+      });
+
+    calendarFetchInFlight.set(targetDate, promise);
+  }
+
+  try {
+    return await calendarFetchInFlight.get(targetDate);
+  } catch (error) {
+    if (cached) {
+      console.error("Calendar refresh failed; using cached calendar:", error.message);
+      return cached.events;
+    }
+    throw error;
+  }
 }
 
 function displayCalendarEvents(events) {
@@ -565,17 +668,7 @@ function buildClareWorkSummary(events, rows, today, tomorrow, nowHour) {
   };
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function fetchWeather() {
+function weatherRequestUrl() {
   const params = new URLSearchParams({
     latitude: String(LATITUDE),
     longitude: String(LONGITUDE),
@@ -586,37 +679,271 @@ async function fetchWeather() {
     daily: ["weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max"].join(",")
   });
 
-  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
-  let lastError;
+  return `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+}
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const response = await fetchWithTimeout(url, {
-        headers: { "User-Agent": "ottawa-trmnl-weather/5.0" }
-      }, 12000);
+function metNoSymbolToCode(symbolCode = "") {
+  const s = String(symbolCode).toLowerCase();
+  if (s.includes("thunder")) return 95;
+  if (s.includes("snow")) return 73;
+  if (s.includes("sleet")) return 67;
+  if (s.includes("rain")) return s.includes("showers") ? 81 : 63;
+  if (s.includes("fog")) return 45;
+  if (s.includes("partlycloudy")) return 2;
+  if (s.includes("cloudy")) return 3;
+  if (s.includes("fair")) return 1;
+  if (s.includes("clearsky")) return 0;
+  return 3;
+}
 
-      if (!response.ok) {
-        throw new Error(`Open-Meteo returned HTTP ${response.status}`);
-      }
+function apparentTemperatureC(tempC, windMs, humidity) {
+  const t = Number(tempC);
+  const windKmh = Number(windMs || 0) * 3.6;
+  const rh = Number(humidity || 0);
 
-      const data = await response.json();
-      if (!data || !data.current || !data.hourly || !data.daily) {
-        throw new Error("Open-Meteo response was missing required weather fields");
-      }
-
-      lastWeatherError = null;
-      return data;
-    } catch (error) {
-      lastError = error;
-      console.error(`Weather fetch attempt ${attempt}/3 failed:`, error.message);
-      if (attempt < 3) {
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-      }
-    }
+  if (Number.isFinite(t) && t <= 10 && windKmh > 4.8) {
+    return 13.12 + 0.6215 * t - 11.37 * Math.pow(windKmh, 0.16) + 0.3965 * t * Math.pow(windKmh, 0.16);
   }
 
-  lastWeatherError = lastError ? lastError.message : "Unknown weather fetch error";
-  throw lastError || new Error(lastWeatherError);
+  // Keep the fallback conservative in warm weather rather than inventing a humidex.
+  if (Number.isFinite(t)) return t;
+  return null;
+}
+
+function metNoToWeather(data) {
+  const series = data?.properties?.timeseries;
+  if (!Array.isArray(series) || series.length === 0) {
+    throw new Error("MET Norway response was missing hourly data");
+  }
+
+  const hourly = {
+    time: [],
+    temperature_2m: [],
+    apparent_temperature: [],
+    precipitation_probability: [],
+    precipitation: [],
+    rain: [],
+    showers: [],
+    snowfall: [],
+    weather_code: [],
+    wind_speed_10m: [],
+    wind_gusts_10m: []
+  };
+
+  const dailyMap = new Map();
+  let firstCurrent = null;
+
+  for (const point of series.slice(0, 80)) {
+    const instant = point?.data?.instant?.details || {};
+    const next1 = point?.data?.next_1_hours || {};
+    const next6 = point?.data?.next_6_hours || {};
+    const summary = next1.summary || next6.summary || {};
+    const details = next1.details || next6.details || {};
+    const d = new Date(point.time);
+    if (Number.isNaN(d.getTime())) continue;
+
+    const lp = localParts(d);
+    const date = isoDate(lp);
+    const localStamp = `${date}T${pad2(lp.hour)}:00`;
+    const temp = Number(instant.air_temperature);
+    const humidity = Number(instant.relative_humidity);
+    const windMs = Number(instant.wind_speed || 0);
+    const gustMs = Number(instant.wind_speed_of_gust || windMs || 0);
+    const precip = Number(details.precipitation_amount || 0);
+    const pop = Number(details.probability_of_precipitation || 0);
+    const symbol = String(summary.symbol_code || "cloudy");
+    const code = metNoSymbolToCode(symbol);
+    const snowish = symbol.toLowerCase().includes("snow") || symbol.toLowerCase().includes("sleet");
+
+    hourly.time.push(localStamp);
+    hourly.temperature_2m.push(Number.isFinite(temp) ? temp : null);
+    hourly.apparent_temperature.push(apparentTemperatureC(temp, windMs, humidity));
+    hourly.precipitation_probability.push(Number.isFinite(pop) ? pop : 0);
+    hourly.precipitation.push(precip);
+    hourly.rain.push(snowish ? 0 : precip);
+    hourly.showers.push(0);
+    // MET Norway gives liquid-equivalent precipitation. For the fallback only,
+    // use a conservative 1 mm water ~= 1 cm snow estimate when the symbol is snow/sleet.
+    hourly.snowfall.push(snowish ? precip : 0);
+    hourly.weather_code.push(code);
+    hourly.wind_speed_10m.push(windMs * 3.6);
+    hourly.wind_gusts_10m.push(gustMs * 3.6);
+
+    if (!firstCurrent) {
+      firstCurrent = {
+        temperature_2m: Number.isFinite(temp) ? temp : null,
+        apparent_temperature: apparentTemperatureC(temp, windMs, humidity),
+        weather_code: code,
+        precipitation: precip,
+        rain: snowish ? 0 : precip,
+        showers: 0
+      };
+    }
+
+    const existing = dailyMap.get(date) || {
+      temps: [],
+      codes: [],
+      pops: []
+    };
+    if (Number.isFinite(temp)) existing.temps.push(temp);
+    existing.codes.push(code);
+    if (Number.isFinite(pop)) existing.pops.push(pop);
+    dailyMap.set(date, existing);
+  }
+
+  const dates = [...dailyMap.keys()].sort();
+  const daily = {
+    time: [],
+    weather_code: [],
+    temperature_2m_max: [],
+    temperature_2m_min: [],
+    precipitation_probability_max: []
+  };
+
+  for (const date of dates.slice(0, 4)) {
+    const d = dailyMap.get(date);
+    const temps = d.temps.length ? d.temps : [null];
+    const validTemps = temps.filter(Number.isFinite);
+    const codes = d.codes.length ? d.codes : [3];
+    const representative = codes.reduce((best, code) => weatherSeverity(code) > weatherSeverity(best) ? code : best, codes[0]);
+
+    daily.time.push(date);
+    daily.weather_code.push(representative);
+    daily.temperature_2m_max.push(validTemps.length ? Math.max(...validTemps) : null);
+    daily.temperature_2m_min.push(validTemps.length ? Math.min(...validTemps) : null);
+    daily.precipitation_probability_max.push(d.pops.length ? Math.max(...d.pops) : 0);
+  }
+
+  return {
+    provider: "MET Norway",
+    current: firstCurrent || {},
+    hourly,
+    daily
+  };
+}
+
+async function fetchMetNoWeather() {
+  const url = `https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=${LATITUDE}&lon=${LONGITUDE}`;
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "ottawa-trmnl-weather/8.0 contact: trmnl-weather",
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`MET Norway returned HTTP ${response.status}`);
+  }
+
+  return metNoToWeather(await response.json());
+}
+
+async function fetchOpenMeteoWeather() {
+  const response = await fetch(weatherRequestUrl(), {
+    headers: {
+      "User-Agent": "ottawa-trmnl-weather/8.0",
+      "Accept": "application/json"
+    }
+  });
+
+  if (response.status === 429) {
+    openMeteoBlockedUntil = Date.now() + 30 * 60 * 1000;
+    throw new Error("Open-Meteo returned HTTP 429");
+  }
+
+  if (!response.ok) {
+    throw new Error(`Open-Meteo returned HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (!data || !data.current || !data.hourly || !data.daily) {
+    throw new Error("Open-Meteo response was missing required weather fields");
+  }
+
+  data.provider = "Open-Meteo";
+  return data;
+}
+
+async function fetchWeatherFromSource() {
+  const errors = [];
+
+  if (Date.now() >= openMeteoBlockedUntil) {
+    try {
+      return await fetchOpenMeteoWeather();
+    } catch (error) {
+      errors.push(error?.message || String(error));
+      console.warn("Primary weather source unavailable:", errors[errors.length - 1]);
+    }
+  } else {
+    errors.push("Open-Meteo temporarily in 429 cooldown");
+  }
+
+  try {
+    const fallback = await fetchMetNoWeather();
+    console.log("Using MET Norway weather fallback");
+    return fallback;
+  } catch (error) {
+    errors.push(error?.message || String(error));
+  }
+
+  throw new Error(`All weather sources failed: ${errors.join("; ")}`);
+}
+
+function startWeatherRefresh() {
+  if (weatherFetchInFlight) return weatherFetchInFlight;
+
+  weatherFetchInFlight = fetchWeatherFromSource()
+    .then((data) => {
+      weatherCache = { data, fetchedAt: Date.now() };
+      lastWeatherError = null;
+      lastWeatherProvider = data?.provider || "unknown";
+      console.log(`Weather cache refreshed successfully via ${lastWeatherProvider}`);
+      return data;
+    })
+    .catch((error) => {
+      lastWeatherError = error?.message || String(error);
+      console.error("Weather refresh failed:", lastWeatherError);
+      throw error;
+    })
+    .finally(() => {
+      weatherFetchInFlight = null;
+    });
+
+  return weatherFetchInFlight;
+}
+
+function softTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Weather request still pending after ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs);
+      if (typeof timer.unref === "function") timer.unref();
+    })
+  ]);
+}
+
+async function getWeather() {
+  const age = weatherCache.data ? Date.now() - weatherCache.fetchedAt : Infinity;
+
+  if (weatherCache.data && age < WEATHER_CACHE_TTL_MS) {
+    return { data: weatherCache.data, stale: false };
+  }
+
+  const refresh = startWeatherRefresh();
+
+  if (weatherCache.data) {
+    // Never make TRMNL wait on a refresh when we already have usable data.
+    refresh.catch(() => {});
+    return {
+      data: weatherCache.data,
+      stale: age >= WEATHER_CACHE_TTL_MS,
+      very_stale: age >= WEATHER_STALE_MAX_MS
+    };
+  }
+
+  // Cold start only: wait longer for the first successful weather fetch.
+  const data = await softTimeout(refresh, 35000);
+  return { data, stale: false };
 }
 
 async function makePayload() {
@@ -630,7 +957,8 @@ async function makePayload() {
   else if (now.hour >= 8 && now.hour < 9) mode = "calendar";
   else if (!isWeekend && now.hour >= 7 && now.hour < 8) mode = "school";
 
-  const weather = await fetchWeather();
+  const weatherResult = await getWeather();
+  const weather = weatherResult.data;
 
   let allCalendarEvents = [];
   if (mode === "calendar" || (now.hour >= 16 && now.hour < 19)) {
@@ -667,7 +995,8 @@ async function makePayload() {
 
   const payload = {
     weather_ok: true,
-    stale: false,
+    weather_source: weather?.provider || lastWeatherProvider || "unknown",
+    stale: Boolean(weatherResult.stale),
     location: "Ottawa",
     timezone: TIMEZONE,
     mode,
@@ -693,7 +1022,7 @@ async function makePayload() {
           : raincoat?.needed ? "RAINCOAT TODAY" : "NO RAINCOAT NEEDED",
       message: raincoat?.message || "Rain forecast unavailable"
     },
-    hours: buildDisplayHours(rows, mode, today, tomorrow, now.hour),
+    hours: buildDisplayHours(rows, mode, today, tomorrow, now.hour, Boolean(clareWork && clareWork.active)),
     calendar: {
       visible: mode === "calendar",
       has_events: calendarResult.length > 0,
@@ -702,11 +1031,11 @@ async function makePayload() {
     },
     clare_work: clareWork,
     joke: selectJoke(today),
+    animal_fact: selectAnimalFact(today),
     updated: formatGeneratedTime(now),
     status_message: ""
   };
 
-  lastGoodPayload = JSON.parse(JSON.stringify(payload));
   return payload;
 }
 
@@ -721,20 +1050,9 @@ function makeFallbackPayload(error) {
   else if (now.hour >= 8 && now.hour < 9) mode = "calendar";
   else if (!isWeekend && now.hour >= 7 && now.hour < 8) mode = "school";
 
-  if (lastGoodPayload) {
-    const stale = JSON.parse(JSON.stringify(lastGoodPayload));
-    stale.weather_ok = true;
-    stale.stale = true;
-    stale.mode = mode;
-    stale.mode_title = mode === "evening" ? "TOMORROW" : mode === "school" ? "SCHOOL MORNING" : "TODAY";
-    stale.date_label = `${now.weekday.toUpperCase()} · ${formatTodayDate(now).toUpperCase()}`;
-    stale.updated = `${formatGeneratedTime(now)} · STALE`;
-    stale.status_message = "Using last successful weather update";
-    return stale;
-  }
-
   return {
     weather_ok: false,
+    weather_source: lastWeatherProvider || "unavailable",
     stale: false,
     location: "Ottawa",
     timezone: TIMEZONE,
@@ -764,6 +1082,7 @@ function makeFallbackPayload(error) {
     },
     clare_work: { active: false },
     joke: selectJoke(today),
+    animal_fact: selectAnimalFact(today),
     updated: formatGeneratedTime(now),
     status_message: error?.message || "Weather service unavailable"
   };
@@ -787,10 +1106,14 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         service: "ottawa-trmnl-weather",
-        version: "5.0.0",
+        version: "8.0.0",
         calendar_feeds_configured: ICLOUD_CALENDAR_URLS.length,
-        has_cached_weather: Boolean(lastGoodPayload),
-        last_weather_error: lastWeatherError
+        has_cached_weather: Boolean(weatherCache.data),
+        weather_cache_age_seconds: weatherCache.data ? Math.round((Date.now() - weatherCache.fetchedAt) / 1000) : null,
+        weather_refresh_in_flight: Boolean(weatherFetchInFlight),
+        last_weather_error: lastWeatherError,
+        last_weather_provider: lastWeatherProvider,
+        open_meteo_cooldown_seconds: Math.max(0, Math.round((openMeteoBlockedUntil - Date.now()) / 1000))
       });
       return;
     }
@@ -813,5 +1136,6 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Ottawa TRMNL weather running on port ${PORT}`);
+  console.log(`Ottawa TRMNL weather v8 running on port ${PORT}`);
+  startWeatherRefresh().catch(() => {});
 });

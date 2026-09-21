@@ -86,6 +86,61 @@ const JOKES = [
   ["What kind of snacks do computers eat?", "Microchips."]
 ];
 
+const ANIMAL_FACTS = [
+  "Octopuses have three hearts.",
+  "A group of flamingos is called a flamboyance.",
+  "Sea otters sometimes hold hands while sleeping so they do not drift apart.",
+  "Elephants can recognize themselves in a mirror.",
+  "A hummingbird can fly backward.",
+  "Dolphins use unique whistles that work a bit like names.",
+  "Penguins have knees, but most of their legs are hidden by feathers.",
+  "A giraffe has the same number of neck vertebrae as a human: seven.",
+  "Bees can communicate the direction of food with a waggle dance.",
+  "Crows can remember human faces for years.",
+  "A snail can have thousands of tiny teeth on its tongue-like radula.",
+  "Koalas have fingerprints that look remarkably similar to human fingerprints.",
+  "Butterflies taste with sensors on their feet.",
+  "Owls cannot move their eyes around in their sockets, so they turn their heads instead.",
+  "A blue whale's heart can weigh more than 150 kilograms.",
+  "Goats have rectangular pupils.",
+  "Frogs absorb water through their skin instead of drinking it like we do.",
+  "Polar bears have black skin under their fur.",
+  "Ravens can imitate sounds, including some human speech.",
+  "A kangaroo cannot walk backward easily because of its large tail and legs.",
+  "Cats cannot taste sweetness the way humans can.",
+  "A group of porcupines is called a prickle.",
+  "Sharks existed before trees appeared on Earth.",
+  "Woodpeckers wrap their very long tongues around the inside of their skulls.",
+  "Some turtles can breathe through specialized tissues near their tails while underwater.",
+  "A cheetah can accelerate faster than many sports cars over a short distance.",
+  "Male emperor penguins keep eggs warm on their feet under a fold of skin.",
+  "Squirrels help plant forests by forgetting where some of their buried nuts are.",
+  "A group of hedgehogs is sometimes called an array.",
+  "Dragonflies can fly forward, backward, sideways, and hover.",
+  "Orcas are the largest members of the dolphin family.",
+  "A rabbit's teeth never stop growing.",
+  "Axolotls can regrow lost limbs and parts of some organs.",
+  "Camels have three sets of eyelids to help protect their eyes from sand.",
+  "Sloths can hold their breath underwater for much longer than most people.",
+  "A platypus lays eggs even though it is a mammal.",
+  "Pigeons can recognize themselves in mirrors after training.",
+  "Meerkats take turns acting as lookouts for their group.",
+  "A tiger's stripe pattern is unique, much like a fingerprint.",
+  "Some geckos can climb smooth walls using millions of microscopic hairs on their toes.",
+  "Wombats produce cube-shaped droppings.",
+  "A group of crows is traditionally called a murder.",
+  "Starfish can regrow lost arms, and some species can regrow much more than that.",
+  "Hippos make sounds both above and below water.",
+  "Antarctic icefish have nearly transparent blood because they lack hemoglobin.",
+  "Prairie dogs use different alarm calls for different kinds of predators.",
+  "Parrots can use one foot like a hand to hold food.",
+  "Some bats can eat hundreds of insects in a single hour.",
+  "A narwhal's tusk is actually a very long tooth.",
+  "Red pandas use their bushy tails like blankets in cold weather.",
+  "Honeybees can recognize simple visual patterns and remember them.",
+  "The tiny bones in a cat's ear help give it excellent balance and hearing."
+];
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -312,6 +367,11 @@ function selectJoke(today) {
   const index = dayOfYearIndex(today) % JOKES.length;
   const [question, answer] = JOKES[index];
   return { question, answer };
+}
+
+function selectAnimalFact(today) {
+  const index = (dayOfYearIndex(today) * 7 + 3) % ANIMAL_FACTS.length;
+  return { text: ANIMAL_FACTS[index] };
 }
 
 function normalizeCalendarUrl(url) {
@@ -971,6 +1031,7 @@ async function makePayload() {
     },
     clare_work: clareWork,
     joke: selectJoke(today),
+    animal_fact: selectAnimalFact(today),
     updated: formatGeneratedTime(now),
     status_message: ""
   };
@@ -1021,6 +1082,7 @@ function makeFallbackPayload(error) {
     },
     clare_work: { active: false },
     joke: selectJoke(today),
+    animal_fact: selectAnimalFact(today),
     updated: formatGeneratedTime(now),
     status_message: error?.message || "Weather service unavailable"
   };
