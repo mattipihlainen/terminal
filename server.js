@@ -1032,6 +1032,7 @@ async function makePayload() {
     clare_work: clareWork,
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
+    animal_fact_text: selectAnimalFact(today).text,
     updated: formatGeneratedTime(now),
     status_message: ""
   };
@@ -1083,6 +1084,7 @@ function makeFallbackPayload(error) {
     clare_work: { active: false },
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
+    animal_fact_text: selectAnimalFact(today).text,
     updated: formatGeneratedTime(now),
     status_message: error?.message || "Weather service unavailable"
   };
