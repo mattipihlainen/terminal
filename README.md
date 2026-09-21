@@ -67,3 +67,11 @@ The animal fact is now exposed as a simple root-level `animal_fact_text` field f
 
 ## v11 animal fact fix
 The animal fact is now exposed under both `animal_fact_text` and `animal_fact_of_day`, and the Liquid template falls back to the older nested `animal_fact.text` value. This prevents a blank fact while TRMNL is still holding an older cached plugin payload.
+
+
+## v12 calendar layout changes
+
+- `Clare work` is no longer shown as a normal 8–9 AM calendar event.
+- When a Clare Work event is present, the weather/raincoat row shows a compact **CLARE WORKS TONIGHT** note with the shift time.
+- The normal calendar list is deduplicated, excludes Clare Work, and is capped at 4 events so it cannot push the joke/animal fact off screen.
+- During 4–7 PM, the existing detailed Clare walk-home/overnight weather panel remains active.

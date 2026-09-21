@@ -536,12 +536,32 @@ async function fetchCalendars(targetDate) {
 }
 
 function displayCalendarEvents(events) {
-  return events.slice(0, 6).map((event) => ({
-    title: event.title,
-    location: event.location,
-    time: event.end_time ? `${event.time}–${event.end_time}` : event.time,
-    all_day: event.all_day
-  }));
+  const filtered = events.filter((event) => !/CLARE\s+WORK/i.test(event.title || ""));
+  const seen = new Set();
+  const unique = [];
+
+  for (const event of filtered) {
+    const displayTime = event.end_time ? `${event.time}–${event.end_time}` : event.time;
+    const key = [
+      String(event.title || "").trim().toLowerCase(),
+      String(displayTime || "").trim().toLowerCase(),
+      String(event.location || "").trim().toLowerCase()
+    ].join("|");
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    unique.push({
+      title: event.title,
+      location: event.location,
+      time: displayTime,
+      all_day: event.all_day
+    });
+
+    if (unique.length >= 4) break;
+  }
+
+  return unique;
 }
 
 function findClareWorkEvent(events) {
@@ -609,10 +629,16 @@ function summarizeWeatherRow(row, label) {
 
 function buildClareWorkSummary(events, rows, today, tomorrow, nowHour) {
   const event = findClareWorkEvent(events);
-  const active = Boolean(event) && nowHour >= 16 && nowHour < 19;
+  const present = Boolean(event);
+  const active = present && nowHour >= 16 && nowHour < 19;
 
   if (!active) {
-    return { active: false };
+    return {
+      active: false,
+      present,
+      event_title: event ? event.title : "",
+      event_time: event ? (event.end_time ? `${event.time}–${event.end_time}` : event.time) : ""
+    };
   }
 
   let walkDate = today;
@@ -659,6 +685,7 @@ function buildClareWorkSummary(events, rows, today, tomorrow, nowHour) {
 
   return {
     active: true,
+    present: true,
     urgent,
     event_title: event.title,
     event_time: event.end_time ? `${event.time}–${event.end_time}` : event.time,
@@ -1027,11 +1054,15 @@ async function makePayload() {
       visible: mode === "calendar",
       has_events: calendarResult.length > 0,
       events: calendarResult,
-      empty_message: ICLOUD_CALENDAR_URLS.length > 0 ? "Nothing on these calendars today" : "Calendar not configured"
+      empty_message: ICLOUD_CALENDAR_URLS.length > 0
+        ? (clareWork && clareWork.present ? "No other calendar events today" : "Nothing on these calendars today")
+        : "Calendar not configured"
     },
     clare_work: clareWork,
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
+    animal_fact_text: selectAnimalFact(today).text,
+    animal_fact_of_day: selectAnimalFact(today).text,
     updated: formatGeneratedTime(now),
     status_message: ""
   };
@@ -1083,6 +1114,8 @@ function makeFallbackPayload(error) {
     clare_work: { active: false },
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
+    animal_fact_text: selectAnimalFact(today).text,
+    animal_fact_of_day: selectAnimalFact(today).text,
     updated: formatGeneratedTime(now),
     status_message: error?.message || "Weather service unavailable"
   };
