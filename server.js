@@ -1059,6 +1059,7 @@ async function makePayload() {
         : "Calendar not configured"
     },
     clare_work: clareWork,
+    uber: uberPayload(),
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
     animal_fact_text: selectAnimalFact(today).text,
@@ -1112,6 +1113,7 @@ function makeFallbackPayload(error) {
       empty_message: "Calendar will return when weather service reconnects"
     },
     clare_work: { active: false },
+    uber: uberPayload(),
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
     animal_fact_text: selectAnimalFact(today).text,
@@ -1131,6 +1133,17 @@ function sendJson(response, statusCode, object) {
   response.end(body);
 }
 
+
+// Uber Eats delivery relay: an external watcher posts the live status of one
+// delivery to UBER_RELAY_PATH; /weather exposes it as `uber` while fresh.
+const UBER_RELAY_PATH = "/uber-relay-7a36521892509790";
+let uberRelayState = null;
+function uberPayload() {
+  if (!uberRelayState) return { active: false };
+  if (Date.now() - uberRelayState.at > 12 * 60 * 1000) return { active: false };
+  return { active: true, ...uberRelayState.data };
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
@@ -1148,6 +1161,26 @@ const server = http.createServer(async (request, response) => {
         last_weather_provider: lastWeatherProvider,
         open_meteo_cooldown_seconds: Math.max(0, Math.round((openMeteoBlockedUntil - Date.now()) / 1000))
       });
+      return;
+    }
+
+    if (url.pathname === UBER_RELAY_PATH) {
+      if (request.method === "POST") {
+        let body = "";
+        request.on("data", (chunk) => { body += chunk; if (body.length > 10000) request.destroy(); });
+        request.on("end", () => {
+          try {
+            const data = JSON.parse(body || "{}");
+            uberRelayState = { at: Date.now(), data: {
+              status: String(data.status || ""), eta: String(data.eta || ""),
+              restaurant: String(data.restaurant || ""), detail: String(data.detail || "")
+            } };
+            sendJson(response, 200, { ok: true });
+          } catch (e) { sendJson(response, 400, { error: "bad json" }); }
+        });
+        return;
+      }
+      sendJson(response, 200, { uber: uberPayload() });
       return;
     }
 
