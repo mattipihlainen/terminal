@@ -35,6 +35,7 @@
   .wx-cal-time { width:74px; font-size:14px; font-weight:800; flex:0 0 auto; }
   .wx-cal-title { font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .wx-cal-location { font-size:11px; font-weight:400; }
+  .wx-info-line { font-size:14px; line-height:18px; font-weight:700; margin-bottom:2px; }
   .wx-fun-row { border-top:2px solid #000; margin-top:8px; padding-top:7px; display:grid; grid-template-columns:1fr 1fr; column-gap:24px; }
   .wx-fun-right { border-left:1px solid #000; padding-left:20px; }
   .wx-joke-label { font-size:11px; line-height:13px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:2px; }
@@ -65,6 +66,15 @@
 </style>
 {% endif %}
 
+
+{% if next_day.visible == true %}
+<style>
+  .wx-header { height:88px; }
+  .wx-rain { height:52px; }
+  .wx-hour-icon { display:none; }
+  .wx-hour-temp { font-size:23px; line-height:25px; }
+</style>
+{% endif %}
 
 <div class="wx-screen">
   <div class="wx-header">
@@ -155,7 +165,7 @@
 
   {% if calendar.visible == true %}
     <div class="wx-calendar">
-      <div class="wx-section-title">Today's calendar</div>
+      <div class="wx-section-title">{{ calendar.heading }}</div>
       {% if calendar.has_events == true %}
         <div class="wx-cal-grid">
           {% for event in calendar.events %}
@@ -174,10 +184,19 @@
     </div>
   {% endif %}
 
-  {% if mode == "evening" and clare_work.active != true %}
+  {% if mode == "evening" and clare_work.active != true and next_day.visible != true %}
     <div class="wx-calendar">
       <div class="wx-section-title">Tomorrow morning</div>
       <div class="wx-cal-title">Around {{ focus.morning_temp }}° at 7–8 AM · {{ focus.condition }}</div>
+    </div>
+  {% endif %}
+
+  {% if next_day.visible == true %}
+    <div class="wx-calendar">
+      <div class="wx-section-title">Tomorrow · Need to know</div>
+      {% for line in next_day.info %}
+        <div class="wx-info-line">{{ line }}</div>
+      {% endfor %}
     </div>
   {% endif %}
 

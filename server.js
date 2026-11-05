@@ -564,16 +564,36 @@ function displayCalendarEvents(events) {
   return unique;
 }
 
-function findClareWorkEvent(events) {
+function findClareWorkEvent(events, startDate) {
+  if (!startDate) return null;
+  const nextDate = addCalendarDays(startDate, 1);
+
   return events.find((event) => {
-    if (!/CLARE\s+WORK/i.test(event.title || "")) return false;
-    if (event.all_day) return true;
+    // Exact title only: "Clare work christmas party", "Clare work dinner"
+    // and similar titles are not night shifts.
+    if (!/^clare\s+work$/i.test(String(event.title || "").trim())) return false;
+    if (event.all_day) return false;
+    if (!(event.start instanceof Date) || Number.isNaN(event.start.getTime())) return false;
+    if (!(event.end instanceof Date) || Number.isNaN(event.end.getTime())) return false;
 
-    const startHour = eventLocalHour(event.start);
-    const endHour = eventLocalHour(event.end);
+    // A night shift must START on the evening in question and END the next
+    // morning. An event that merely overlaps the day (last night's shift
+    // ending this morning) is not tonight's shift, even though it appears
+    // in today's event list.
+    if (localDateString(event.start) !== startDate) return false;
+    if (localDateString(event.end) !== nextDate) return false;
 
-    return (startHour !== null && startHour >= 12) || (endHour !== null && endHour >= 16);
+    return true;
   }) || null;
+}
+
+function clareWalkHomeLine(event, rows, dayWord) {
+  if (!event || !(event.end instanceof Date) || Number.isNaN(event.end.getTime())) return null;
+  const endDate = localDateString(event.end);
+  const endHour = eventLocalHour(event.end) ?? 7;
+  const row = nearestWeatherRow(rows, endDate, endHour);
+  const summary = summarizeWeatherRow(row, "");
+  return `Clare walks home ${dayWord} around ${formatDateTime(event.end)} · ${summary.temp}° · feels ${summary.feels}° · ${summary.condition}`;
 }
 
 function weatherSeverity(code) {
@@ -628,7 +648,7 @@ function summarizeWeatherRow(row, label) {
 }
 
 function buildClareWorkSummary(events, rows, today, tomorrow, nowHour) {
-  const event = findClareWorkEvent(events);
+  const event = findClareWorkEvent(events, today);
   const present = Boolean(event);
   const active = present && nowHour >= 16 && nowHour < 19;
 
@@ -987,8 +1007,11 @@ async function makePayload() {
   const weatherResult = await getWeather();
   const weather = weatherResult.data;
 
+  const morningCalendarWindow = now.hour >= 7 && now.hour < 10;
+  const lateRundownWindow = now.hour >= 20;
+
   let allCalendarEvents = [];
-  if (mode === "calendar" || (now.hour >= 16 && now.hour < 19)) {
+  if (morningCalendarWindow || mode === "calendar" || lateRundownWindow || (now.hour >= 16 && now.hour < 19)) {
     try {
       allCalendarEvents = await fetchCalendars(today);
     } catch (error) {
@@ -997,7 +1020,17 @@ async function makePayload() {
     }
   }
 
-  const calendarResult = displayCalendarEvents(allCalendarEvents);
+  let tomorrowCalendarEvents = [];
+  if (lateRundownWindow) {
+    try {
+      tomorrowCalendarEvents = await fetchCalendars(tomorrow);
+    } catch (error) {
+      console.error("Tomorrow calendar fetch failed:", error.message);
+      tomorrowCalendarEvents = [];
+    }
+  }
+
+  const calendarResult = displayCalendarEvents(lateRundownWindow ? tomorrowCalendarEvents : allCalendarEvents);
 
   const rows = hourlyRows(weather);
   const focusDate = mode === "evening" ? tomorrow : today;
@@ -1019,6 +1052,27 @@ async function makePayload() {
   }
 
   const clareWork = buildClareWorkSummary(allCalendarEvents, rows, today, tomorrow, now.hour);
+
+  // Next-day rundown (8 PM to midnight): what tomorrow holds and what the
+  // household needs to know tonight, in short lines.
+  const nextDayInfo = [];
+  if (lateRundownWindow) {
+    const morningTemp = findMorningTemperature(rows, tomorrow);
+    const morningRow = nearestWeatherRow(rows, tomorrow, 7);
+    const morningCondition = morningRow ? weatherDescription(morningRow.code) : (focusDaily.description || "Forecast unavailable");
+    nextDayInfo.push(`Tomorrow morning: around ${morningTemp ?? "--"}° at 7–8 AM · ${morningCondition}`);
+
+    const tonightShift = findClareWorkEvent(allCalendarEvents, today);
+    const tonightWalk = clareWalkHomeLine(tonightShift, rows, "tomorrow");
+    if (tonightWalk) nextDayInfo.push(tonightWalk);
+
+    const tomorrowShift = findClareWorkEvent(tomorrowCalendarEvents, tomorrow);
+    if (tomorrowShift) {
+      nextDayInfo.push(`Clare works tomorrow night · ${tomorrowShift.time}–${tomorrowShift.end_time}`);
+      const tomorrowWalk = clareWalkHomeLine(tomorrowShift, rows, "the next morning");
+      if (tomorrowWalk) nextDayInfo.push(tomorrowWalk);
+    }
+  }
 
   const payload = {
     weather_ok: true,
@@ -1051,14 +1105,23 @@ async function makePayload() {
     },
     hours: buildDisplayHours(rows, mode, today, tomorrow, now.hour, Boolean(clareWork && clareWork.active)),
     calendar: {
-      visible: mode === "calendar",
+      visible: morningCalendarWindow || lateRundownWindow,
+      heading: lateRundownWindow ? "Tomorrow's calendar" : "Today's calendar",
       has_events: calendarResult.length > 0,
       events: calendarResult,
       empty_message: ICLOUD_CALENDAR_URLS.length > 0
-        ? (clareWork && clareWork.present ? "No other calendar events today" : "Nothing on these calendars today")
+        ? (lateRundownWindow
+            ? "Nothing on these calendars tomorrow"
+            : (clareWork && clareWork.present ? "No other calendar events today" : "Nothing on these calendars today"))
         : "Calendar not configured"
     },
     clare_work: clareWork,
+    next_day: {
+      visible: lateRundownWindow,
+      date: tomorrow,
+      date_label: `${weekdayForDate(tomorrow).toUpperCase()} · ${tomorrow}`,
+      info: nextDayInfo
+    },
     uber: uberPayload(),
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
@@ -1108,11 +1171,13 @@ function makeFallbackPayload(error) {
     hours: [],
     calendar: {
       visible: mode === "calendar",
+      heading: "Today's calendar",
       has_events: false,
       events: [],
       empty_message: "Calendar will return when weather service reconnects"
     },
     clare_work: { active: false },
+    next_day: { visible: false, date: tomorrow, date_label: "", info: [] },
     uber: uberPayload(),
     joke: selectJoke(today),
     animal_fact: selectAnimalFact(today),
